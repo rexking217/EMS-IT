@@ -1,9 +1,13 @@
 export interface EMSData {
+  siteName: string;
+  deviceId: string;
   timestamp: string;
   system: {
     status: 'normal' | 'warning' | 'critical';
     uptime: string;
     connection: 'online' | 'offline';
+    frequency: number;
+    bus_voltage: number;
   };
   battery: {
     soc: number;
@@ -11,6 +15,19 @@ export interface EMSData {
     voltage: number;
     current: number;
     temp: number;
+    max_temp: {
+      value: number;
+      position: string;
+    };
+    min_temp: {
+      value: number;
+      position: string;
+    };
+  };
+  safety: {
+    fire_alarm: boolean;
+    door_status: string;
+    emergency_stop: boolean;
   };
   power: {
     pv_kw: number;

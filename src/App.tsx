@@ -74,13 +74,14 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [notifications, setNotifications] = useState<Alert[]>([]);
+  const [selectedSite, setSelectedSite] = useState<'chiayi' | 'xinying'>('chiayi');
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         const [statusRes, historyRes] = await Promise.all([
-          fetch('/api/ems/status'),
-          fetch('/api/ems/history')
+          fetch(`/api/ems/status?site=${selectedSite}`),
+          fetch(`/api/ems/history?site=${selectedSite}`)
         ]);
         const statusData = await statusRes.json();
         const historyData = await historyRes.json();
@@ -92,7 +93,7 @@ export default function App() {
         if (statusData.alerts.length > 0) {
           setNotifications(prev => {
             const newAlerts = statusData.alerts.filter((a: Alert) => !prev.find(p => p.id === a.id));
-            return [...newAlerts, ...prev].slice(0, 5);
+            return [...newAlerts, ...prev].slice(0, 10);
           });
         }
       } catch (error) {
@@ -103,7 +104,7 @@ export default function App() {
     fetchData();
     const interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedSite]);
 
   if (!data) return (
     <div className="min-h-screen bg-black flex items-center justify-center">
@@ -178,7 +179,27 @@ export default function App() {
             >
               {isSidebarOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
-            <h2 className="text-lg font-semibold text-white">
+            <div className="flex items-center gap-2 bg-zinc-900 p-1 rounded-lg border border-zinc-800">
+              <button 
+                onClick={() => setSelectedSite('chiayi')}
+                className={cn(
+                  "px-4 py-1.5 text-xs font-bold rounded-md transition-all",
+                  selectedSite === 'chiayi' ? "bg-emerald-500 text-black shadow-lg shadow-emerald-500/20" : "text-zinc-500 hover:text-zinc-300"
+                )}
+              >
+                盛大嘉義場
+              </button>
+              <button 
+                onClick={() => setSelectedSite('xinying')}
+                className={cn(
+                  "px-4 py-1.5 text-xs font-bold rounded-md transition-all",
+                  selectedSite === 'xinying' ? "bg-emerald-500 text-black shadow-lg shadow-emerald-500/20" : "text-zinc-500 hover:text-zinc-300"
+                )}
+              >
+                盛大新營場
+              </button>
+            </div>
+            <h2 className="text-lg font-semibold text-white ml-4">
               {activeTab === 'dashboard' && '系統概覽'}
               {activeTab === 'monitor' && '即時運行狀態'}
               {activeTab === 'history' && '歷史趨勢分析'}
@@ -226,19 +247,18 @@ export default function App() {
               color="bg-emerald-500"
             />
             <StatCard 
-              label="當前功率" 
-              value={data.power.battery_kw} 
-              unit="kW" 
-              icon={Zap} 
-              trend={-1.2}
+              label="系統頻率" 
+              value={data.system.frequency} 
+              unit="Hz" 
+              icon={Activity} 
               color="bg-blue-500"
             />
             <StatCard 
-              label="電池溫度" 
-              value={data.battery.temp} 
+              label="電池最高溫" 
+              value={data.battery.max_temp.value} 
               unit="°C" 
               icon={Thermometer} 
-              color="bg-orange-500"
+              color="bg-rose-500"
             />
             <StatCard 
               label="系統健康度 (SoH)" 
@@ -249,12 +269,51 @@ export default function App() {
             />
           </div>
 
+          {/* Safety and System Details */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className={cn(
+              "p-4 rounded-xl border flex items-center gap-4",
+              data.safety.fire_alarm ? "bg-rose-500/10 border-rose-500 text-rose-500" : "bg-zinc-900/50 border-zinc-800 text-zinc-400"
+            )}>
+              <div className={cn("p-2 rounded-lg", data.safety.fire_alarm ? "bg-rose-500 text-white" : "bg-zinc-800")}>
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase">火警監測狀態</p>
+                <p className="text-lg font-bold">{data.safety.fire_alarm ? '!!! 火警告警 !!!' : '正常'}</p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border bg-zinc-900/50 border-zinc-800 flex items-center gap-4">
+              <div className="p-2 bg-zinc-800 rounded-lg text-zinc-400">
+                <Thermometer size={20} />
+              </div>
+              <div className="flex-1">
+                <p className="text-xs font-medium uppercase text-zinc-500">最低模組溫度</p>
+                <div className="flex justify-between items-baseline">
+                  <p className="text-lg font-bold text-white">{data.battery.min_temp.value.toFixed(1)} °C</p>
+                  <p className="text-[10px] font-mono text-zinc-500">{data.battery.min_temp.position}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border bg-zinc-900/50 border-zinc-800 flex items-center gap-4">
+              <div className="p-2 bg-zinc-800 rounded-lg text-zinc-400">
+                <Zap size={20} />
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase text-zinc-500">匯流排電壓</p>
+                <p className="text-lg font-bold text-white">{data.system.bus_voltage.toFixed(1)} V</p>
+              </div>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             {/* Main Chart */}
             <div className="lg:col-span-2 bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
               <div className="flex justify-between items-center mb-8">
                 <div>
-                  <h3 className="text-lg font-semibold text-white">功率與電量趨勢</h3>
+                  <h3 className="text-lg font-semibold text-white">{data.siteName} - 功率與電量趨勢</h3>
                   <p className="text-sm text-zinc-500">過去 24 小時運行數據</p>
                 </div>
                 <div className="flex gap-2">
