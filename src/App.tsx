@@ -241,13 +241,24 @@ export default function App() {
     const fetchData = async () => {
       const API_BASE = "http://172.16.100.4:5050"; // 您的本機 API 位址
       
+      // Mapping internal site IDs to API site names
+      const siteMapping: Record<string, string> = {
+        'chiayi': 'Shanda_Chiayi',
+        'xinying': 'Shanda_Xinying',
+        'wanxing': 'Kaohsiung_Wanxing',
+        'beimen': 'Fengshan_Beimen',
+        'dalian': 'Pingtung_Dalian'
+      };
+      
+      const apiSiteName = siteMapping[selectedSite] || selectedSite;
+
       try {
         // 嘗試直接從瀏覽器連線到本機 API
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // Increase to 5 seconds
+        const timeoutId = setTimeout(() => controller.abort(), 5000);
 
         const [statusRes, historyRes] = await Promise.all([
-          fetch(`${API_BASE}/api/ems/status?site=${selectedSite}`, { signal: controller.signal }),
+          fetch(`${API_BASE}/get_plant_EquipData/satus?${apiSiteName}`, { signal: controller.signal }),
           fetch(`${API_BASE}/api/ems/history?site=${selectedSite}`, { signal: controller.signal })
         ]);
 
