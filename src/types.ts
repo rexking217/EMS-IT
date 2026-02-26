@@ -8,6 +8,9 @@ export interface EMSData {
     connection: 'online' | 'offline';
     frequency: number;
     bus_voltage: number;
+    real_power_kw: number;
+    reactive_power_kvar: number;
+    execution_rate: number;
   };
   battery: {
     soc: number;
@@ -36,10 +39,20 @@ export interface EMSData {
     battery_kw: number;
   };
   alerts: Alert[];
+  devices: Device[];
+}
+
+export interface Device {
+  id: string;
+  name: string;
+  status: 'normal' | 'warning' | 'critical';
+  soc: number;
+  temp: number;
+  voltage: number;
 }
 
 export interface Alert {
-  id: number;
+  id: string | number;
   type: 'info' | 'warning' | 'critical';
   message: string;
   time: string;
@@ -49,4 +62,7 @@ export interface HistoryData {
   time: string;
   soc: number;
   power: number;
+  frequency: number;
+  execution_rate: number;
+  reactive_power: number;
 }
