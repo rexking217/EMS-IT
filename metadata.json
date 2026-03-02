@@ -1,5 +1,5 @@
 {
-  "name": "SANTI 三地能源 - EMS 監控系統",
+  "name": "三地能源 EMS 監控系統",
   "description": "三地能源專業級儲能系統 (BESS) 能源管理監控平台，提供即時數據視覺化、系統狀態追蹤及異常告警通報功能。",
   "requestFramePermissions": [
     "notifications"

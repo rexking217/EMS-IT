@@ -445,16 +445,17 @@ export default function App() {
         isSidebarOpen ? "w-64" : "w-0 -translate-x-full lg:w-20 lg:translate-x-0"
       )}>
         <div className="p-6 flex items-center gap-3">
-          <div className="bg-emerald-600 p-2 rounded-lg shadow-lg shadow-emerald-600/20">
-            <Zap size={20} className="text-white" />
-          </div>
-          {isSidebarOpen && (
-            <div className="flex flex-col">
-              <span className="font-bold text-lg text-white tracking-tight leading-none">SANTI</span>
-              <span className="text-[10px] text-emerald-500 font-bold tracking-[0.2em] mt-1">三地能源</span>
-              <span className="text-[8px] text-zinc-600 mt-2 font-medium">落實地球永續 / 綠能整合服務平台</span>
+          <div className="flex items-center gap-3">
+            <div className="bg-emerald-600 p-2 rounded-lg shadow-lg shadow-emerald-600/20 flex-shrink-0">
+              <Zap size={20} className="text-white" />
             </div>
-          )}
+            {isSidebarOpen && (
+              <div className="flex flex-col overflow-hidden">
+                <span className="font-bold text-lg text-white tracking-tight leading-none truncate">三地能源</span>
+                <span className="text-[10px] text-emerald-500 font-bold tracking-[0.1em] mt-1 truncate">SANTI RENEWABLE</span>
+              </div>
+            )}
+          </div>
         </div>
 
         <nav className="px-3 mt-6 space-y-2">
