@@ -11,6 +11,7 @@ export interface EMSData {
     real_power_kw: number;
     reactive_power_kvar: number;
     execution_rate: number;
+    service_type?: number;
   };
   battery: {
     soc: number;

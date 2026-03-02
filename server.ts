@@ -2,6 +2,104 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 
+const SITE_CONFIGS: Record<string, {
+  siteName: string;
+  baseSoc: number;
+  baseSoh: number;
+  basePower: number;
+  baseFreq: number;
+  reactivePower: number;
+  isOperational: boolean;
+  deviceCount: number;
+  devicePrefix: string;
+  baseTemp: number;
+  baseVoltage: number;
+  busVoltage: number;
+  uptime: string;
+  serviceType: number;
+}> = {
+  'chiayi': {
+    siteName: "盛大嘉義場",
+    baseSoc: 58.4,
+    baseSoh: 89.0,
+    basePower: 93.6,
+    baseFreq: 59.980,
+    reactivePower: -13.4,
+    isOperational: true,
+    deviceCount: 10,
+    devicePrefix: "電池模組",
+    baseTemp: 19.0,
+    baseVoltage: 1200,
+    busVoltage: 1261.8,
+    uptime: "156d 08h 45m",
+    serviceType: 1
+  },
+  'xinying': {
+    siteName: "盛大新營場",
+    baseSoc: 30.6,
+    baseSoh: 98.5,
+    basePower: 960.7,
+    baseFreq: 60.020,
+    reactivePower: -5.0,
+    isOperational: true,
+    deviceCount: 6,
+    devicePrefix: "Megapack",
+    baseTemp: 25.7,
+    baseVoltage: 480,
+    busVoltage: 480.0,
+    uptime: "89d 12h 10m",
+    serviceType: 2
+  },
+  'wanxing': {
+    siteName: "高雄灣興",
+    baseSoc: 45.2,
+    baseSoh: 97.2,
+    basePower: 0,
+    baseFreq: 60.005,
+    reactivePower: -8.2,
+    isOperational: false,
+    deviceCount: 6,
+    devicePrefix: "電池模組",
+    baseTemp: 19.0,
+    baseVoltage: 480,
+    busVoltage: 480.0,
+    uptime: "45d 06h 20m",
+    serviceType: 3
+  },
+  'beimen': {
+    siteName: "鳳山北門",
+    baseSoc: 45.0,
+    baseSoh: 93.0,
+    basePower: -42.6,
+    baseFreq: 60.005,
+    reactivePower: 75.6,
+    isOperational: true,
+    deviceCount: 20,
+    devicePrefix: "ESS-MOD",
+    baseTemp: 30.0,
+    baseVoltage: 1200,
+    busVoltage: 23059.5,
+    uptime: "120d 14h 30m",
+    serviceType: 6
+  },
+  'dalian': {
+    siteName: "屏東大連",
+    baseSoc: 33.28,
+    baseSoh: 99.1,
+    basePower: -88.2,
+    baseFreq: 60.030,
+    reactivePower: 168.0,
+    isOperational: true,
+    deviceCount: 5,
+    devicePrefix: "Megapack",
+    baseTemp: 30.0,
+    baseVoltage: 91.6,
+    busVoltage: 23093.0,
+    uptime: "210d 02h 15m",
+    serviceType: 6
+  }
+};
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -17,109 +115,51 @@ async function startServer() {
   // Mock EMS Data Generator
   const getMockEMSData = (site: string) => {
     const now = new Date();
-    const isChiayi = site === 'chiayi';
-    const isXinying = site === 'xinying';
-    const isWanxing = site === 'wanxing';
-    const isBeimen = site === 'beimen';
-    const isDalian = site === 'dalian';
+    const config = SITE_CONFIGS[site] || {
+      siteName: "未知案場",
+      baseSoc: 50.0,
+      baseSoh: 95.0,
+      basePower: 100.0,
+      baseFreq: 60.0,
+      reactivePower: 0,
+      isOperational: true,
+      deviceCount: 6,
+      devicePrefix: "設備",
+      baseTemp: 25.0,
+      baseVoltage: 480,
+      busVoltage: 480,
+      uptime: "0d",
+      serviceType: 1
+    };
 
-    let baseSoc = 50.0;
-    let baseSoh = 95.0;
-    let siteName = "未知案場";
-    let deviceId = `MOCK-${site.toUpperCase()}-01`;
-    let realPower = 100.0;
-    let reactivePower = -10.0;
-    let freq = 60.000;
-
-    if (isChiayi) {
-      baseSoc = 58.4;
-      baseSoh = 89.0;
-      siteName = "盛大嘉義場";
-      realPower = 93.6;
-      reactivePower = -13.4;
-      freq = 59.980;
-    } else if (isXinying) {
-      baseSoc = 30.6;
-      baseSoh = 98.5;
-      siteName = "盛大新營場";
-      realPower = 960.7;
-      reactivePower = -5.0;
-      freq = 60.020;
-    } else if (isWanxing) {
-      baseSoc = 45.2;
-      baseSoh = 97.2;
-      siteName = "高雄灣興";
-      realPower = 450.5;
-      reactivePower = -8.2;
-      freq = 60.005;
-    } else if (isBeimen) {
-      baseSoc = 0.0;
-      baseSoh = 93.0;
-      siteName = "鳳山北門";
-      realPower = -42.6;
-      reactivePower = 75.6;
-      freq = 60.005;
-    } else if (isDalian) {
-      baseSoc = 33.28;
-      baseSoh = 99.1;
-      siteName = "屏東大連";
-      realPower = -88.2;
-      reactivePower = 168.0;
-      freq = 60.030;
-    }
+    const deviceId = `MOCK-${site.toUpperCase()}-01`;
     
-    // Generate individual devices based on site - Consistent logic for all
-    const devices = (isChiayi || isWanxing || isBeimen)
-      ? Array.from({ length: isChiayi ? 10 : (isBeimen ? 20 : 6) }).map((_, i) => {
-          let soc = baseSoc + (Math.random() - 0.5) * 5;
-          let temp = 19.0 + (Math.random() - 0.5) * 2;
-          let name = `電池模組 ${i+1}`;
-          
-          if (isBeimen) {
-            const beimenSocs = [
-              46.2, 46.5, 48.0, 44.0, 46.9, 44.6, 45.8, 46.4, 47.8, 46.8,
-              36.7, 44.7, 44.6, 45.5, 46.1, 46.9, 43.7, 43.3, 46.3, 42.2
-            ];
-            soc = beimenSocs[i] || 45.0;
-            temp = 30.0;
-            name = i < 10 ? `ESS1-MOD ${i+1}` : `ESS2-MOD ${i-9}`;
-          }
-          
-          return {
-            id: `MOD-${i+1}`,
-            name,
-            status: Math.random() > 0.98 ? "warning" : "normal",
-            soc: Math.max(0, Math.min(100, soc)),
-            temp,
-            voltage: (isBeimen || isChiayi) ? 1200 + (Math.random() - 0.5) * 10 : 480 + (Math.random() - 0.5) * 5
-          };
-        })
-      : Array.from({ length: isDalian ? 5 : 6 }).map((_, i) => {
-          const dalianSoc = [36.0, 36.0, 36.5, 37.0, 36.0];
-          const dalianTemp = [34.0, 31.0, 29.7, 34.5, 30.2];
-          return {
-            id: `MP-0${i+1}`,
-            name: `Megapack #${i+1}`,
-            status: Math.random() > 0.98 ? "warning" : "normal",
-            soc: isDalian ? dalianSoc[i] : (baseSoc + (Math.random() - 0.5) * 10),
-            temp: isDalian ? dalianTemp[i] : (30.0 + (Math.random() - 0.5) * 5),
-            voltage: 91.6 + (Math.random() - 0.5) * 0.1
-          };
-        });
+    // Generate individual devices based on site config
+    const devices = Array.from({ length: config.deviceCount }).map((_, i) => {
+      const soc = config.baseSoc + (Math.random() - 0.5) * 5;
+      const temp = config.baseTemp + (Math.random() - 0.5) * 2;
+      const name = `${config.devicePrefix} ${i + 1}`;
+      
+      return {
+        id: `MOD-${i + 1}`,
+        name,
+        status: Math.random() > 0.98 ? "warning" : "normal",
+        soc: Math.max(0, Math.min(100, soc)),
+        temp,
+        voltage: config.baseVoltage + (Math.random() - 0.5) * 10
+      };
+    });
 
-    const currentSoc = baseSoc + (Math.random() - 0.5) * 0.2;
-    const currentTemp = (isChiayi || isWanxing) ? (19.0 + Math.random() * 2) : (25.7 + Math.random() * 2);
-    const fireAlarm = Math.random() > 0.9995; // Rare fire alarm possible for ALL sites
+    const currentSoc = config.baseSoc + (Math.random() - 0.5) * 0.2;
+    const currentTemp = config.baseTemp + (Math.random() - 0.5) * 2;
+    const fireAlarm = Math.random() > 0.9999; // Extremely rare
 
     // Threshold-based alerts
     const alerts = [];
-    
-    // 1. 系統級告警
     if (currentSoc < 20) {
       alerts.push({ id: `soc-low-sys-${Date.now()}`, type: "warning", message: "系統電能低水平 (low_state_of_energy)", time: now.toISOString() });
     }
     
-    // 2. 設備級告警
     devices.forEach(dev => {
       if (dev.soc < 20) {
         alerts.push({ 
@@ -131,36 +171,37 @@ async function startServer() {
       }
     });
 
-    if (currentTemp > 35) alerts.push({ id: `temp-high-${Date.now()}`, type: "critical", message: "電池溫度異常過高", time: now.toISOString() });
+    if (currentTemp > 45) alerts.push({ id: `temp-high-${Date.now()}`, type: "critical", message: "電池溫度異常過高", time: now.toISOString() });
     if (fireAlarm) alerts.push({ id: `fire-${Date.now()}`, type: "critical", message: "!!! 偵測到火警訊號 !!!", time: now.toISOString() });
     
     return {
-      siteName,
+      siteName: config.siteName,
       deviceId,
       timestamp: now.toISOString(),
       system: {
         status: alerts.length > 0 ? (alerts.some(a => a.type === 'critical') ? "critical" : "warning") : "normal",
-        uptime: isChiayi ? "156d 08h 45m" : "89d 12h 10m",
+        uptime: config.uptime,
         connection: "online",
-        frequency: freq + (Math.random() - 0.5) * 0.01,
-        bus_voltage: (isChiayi || isBeimen || isDalian) ? (isDalian ? 23093.0 : (isBeimen ? 23059.5 : 1261.8)) + (Math.random() - 0.5) * 10 : 480.0 + (Math.random() - 0.5) * 5,
-        real_power_kw: realPower + (Math.random() - 0.5) * 2,
-        reactive_power_kvar: reactivePower + (Math.random() - 0.5) * 0.5,
-        execution_rate: 100.0,
+        frequency: config.baseFreq + (Math.random() - 0.5) * 0.01,
+        bus_voltage: config.busVoltage + (Math.random() - 0.5) * 10,
+        real_power_kw: config.isOperational ? (config.basePower + (Math.random() - 0.5) * 2) : (Math.random() * 0.1),
+        reactive_power_kvar: config.isOperational ? (config.reactivePower + (Math.random() - 0.5) * 0.5) : 0,
+        execution_rate: config.isOperational ? 100.0 : 0,
+        service_type: config.serviceType,
       },
       battery: {
         soc: currentSoc,
-        soh: baseSoh,
-        voltage: isChiayi ? (1261.8 + Math.random() * 5) : (91.6 + Math.random() * 2),
-        current: isChiayi ? (41.0 + (Math.random() - 0.5) * 2) : (41.0 + (Math.random() - 0.5) * 1),
+        soh: config.baseSoh,
+        voltage: config.busVoltage + (Math.random() - 0.5) * 5,
+        current: config.isOperational ? (41.0 + (Math.random() - 0.5) * 2) : 0,
         temp: currentTemp,
         max_temp: {
-          value: isChiayi ? 19.0 : 32.5,
-          position: isChiayi ? "Module-04-Cell-02" : "Megapack-01"
+          value: currentTemp + 2,
+          position: "Module-04-Cell-02"
         },
         min_temp: {
-          value: isChiayi ? 15.0 : 25.3,
-          position: isChiayi ? "Module-01-Cell-08" : "Megapack-01-Ambient"
+          value: currentTemp - 2,
+          position: "Module-01-Cell-08"
         }
       },
       devices,
@@ -170,10 +211,10 @@ async function startServer() {
         emergency_stop: false
       },
       power: {
-        pv_kw: (isWanxing || isBeimen) ? 150.0 + Math.random() * 20 : 27.7 + Math.random() * 5,
-        load_kw: realPower + Math.random() * 3,
-        grid_kw: -2.5 + Math.random() * 1,
-        battery_kw: 5.0 + Math.random() * 2,
+        pv_kw: config.isOperational ? (150.0 + Math.random() * 20) : (Math.random() * 5),
+        load_kw: config.isOperational ? (config.basePower + Math.random() * 3) : 0,
+        grid_kw: config.isOperational ? (-2.5 + Math.random() * 1) : 0,
+        battery_kw: config.isOperational ? (5.0 + Math.random() * 2) : 0,
       },
       alerts
     };
@@ -255,6 +296,7 @@ async function startServer() {
           real_power_kw: apiData.real_p || 0,
           reactive_power_kvar: apiData.reactive_p || 0,
           execution_rate: apiData.exec_rate || 100.0,
+          service_type: apiData.service_type || 1,
         },
         battery: {
           soc: apiData.soc || 0,
@@ -304,6 +346,8 @@ async function startServer() {
 
   app.get("/api/ems/history", async (req, res) => {
     const site = (req.query.site as string) || 'chiayi';
+    const start = req.query.start as string;
+    const end = req.query.end as string;
     
     let deviceId = "";
     switch(site) {
@@ -327,7 +371,15 @@ async function startServer() {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-        const response = await fetch(`${baseUrl}/device/${deviceId}/history?range=24h`, {
+        let url = `${baseUrl}/device/${deviceId}/history`;
+        const params = new URLSearchParams();
+        if (start) params.append('start', start);
+        if (end) params.append('end', end);
+        if (!start && !end) params.append('range', '24h');
+        
+        url += `?${params.toString()}`;
+
+        const response = await fetch(url, {
           headers: { 'Authorization': `Bearer ${apiKey}` },
           signal: controller.signal
         });
@@ -365,27 +417,39 @@ async function startServer() {
     }
 
     if (!history) {
-      // ONLY use mock if NO API is configured at all (for initial demo/dev)
-      let baseSoc = 50;
-      let basePower = 100;
-      let baseFreq = 60.0;
-      
-      if (site === 'chiayi') { baseSoc = 70; basePower = 90; baseFreq = 59.98; }
-      else if (site === 'xinying') { baseSoc = 50; basePower = 900; baseFreq = 60.02; }
-      else if (site === 'wanxing') { baseSoc = 45; basePower = 450; baseFreq = 60.00; }
-      else if (site === 'beimen') { baseSoc = 0.0; basePower = -42.6; baseFreq = 60.005; }
-      else if (site === 'dalian') { baseSoc = 33.28; basePower = -88.2; baseFreq = 60.03; }
+      const config = SITE_CONFIGS[site] || {
+        siteName: "未知案場",
+        baseSoc: 50.0,
+        baseSoh: 95.0,
+        basePower: 100.0,
+        baseFreq: 60.0,
+        reactivePower: 0,
+        isOperational: true,
+        deviceCount: 6,
+        devicePrefix: "設備",
+        baseTemp: 25.0,
+        baseVoltage: 480,
+        busVoltage: 480,
+        uptime: "0d",
+        serviceType: 1
+      };
 
-      history = Array.from({ length: 48 }).map((_, i) => {
-        const hour = Math.floor(i / 2);
-        const min = (i % 2) * 30;
+      const startTime = start ? new Date(start) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const endTime = end ? new Date(end) : new Date();
+      const durationMs = endTime.getTime() - startTime.getTime();
+      const points = 48;
+      const stepMs = durationMs / points;
+
+      history = Array.from({ length: points }).map((_, i) => {
+        const time = new Date(startTime.getTime() + i * stepMs);
+        
         return {
-          time: `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`,
-          soc: baseSoc + (Math.sin(i / 5) * 5) + (Math.random() * 2),
-          power: basePower + (Math.random() - 0.5) * 150, // More fluctuation
-          frequency: baseFreq + (Math.random() - 0.5) * 0.08, // More fluctuation
-          execution_rate: 100.0 - (Math.random() * 0.1), // Very stable near 100%
-          reactive_power: (basePower * 0.2) + (Math.random() - 0.5) * 20,
+          time: time.toISOString(),
+          soc: config.baseSoc + (Math.sin(i / 5) * 5) + (Math.random() * 2),
+          power: config.isOperational ? (config.basePower + (Math.random() - 0.5) * 150) : (Math.random() * 0.1),
+          frequency: config.baseFreq + (Math.random() - 0.5) * 0.08,
+          execution_rate: config.isOperational ? (100.0 - (Math.random() * 0.1)) : 0,
+          reactive_power: config.isOperational ? ((config.basePower * 0.2) + (Math.random() - 0.5) * 20) : 0,
         };
       });
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Activity, 
   Battery, 
@@ -235,6 +235,103 @@ export default function App() {
   const [selectedSite, setSelectedSite] = useState<string>('chiayi');
   const [selectedDevice, setSelectedDevice] = useState<any | null>(null);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  
+  // History analysis states
+  const [historyRange, setHistoryRange] = useState({
+    start: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+    end: new Date().toISOString().slice(0, 16)
+  });
+
+  const fetchHistoryData = async (site: string, start?: string, end?: string) => {
+    const API_BASE = "http://172.16.100.4:5050";
+    let url = `/api/ems/history?site=${site}`;
+    let localUrl = `${API_BASE}/api/ems/history?site=${site}`;
+    
+    if (start) {
+      url += `&start=${start}`;
+      localUrl += `&start=${start}`;
+    }
+    if (end) {
+      url += `&end=${end}`;
+      localUrl += `&end=${end}`;
+    }
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(localUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const historyData = await res.json();
+        setHistory(historyData);
+        return;
+      }
+    } catch (e) {
+      console.warn("Local history API failed, falling back to server API");
+    }
+
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const historyData = await res.json();
+        setHistory(historyData);
+      }
+    } catch (e) {
+      console.error("Failed to fetch history data", e);
+    }
+  };
+
+  const handleAnalyze = () => {
+    fetchHistoryData(selectedSite, historyRange.start, historyRange.end);
+  };
+
+  const historyStats = useMemo(() => {
+    if (!history || history.length === 0) return {
+      avgFreq: 0,
+      maxPower: 0,
+      peakTime: 'N/A',
+      stability: 0,
+      lowExecCount: 0,
+      stdDevFreq: 0
+    };
+
+    const freqs = history.map(h => h.frequency).filter(f => f > 0);
+    const powers = history.map(h => h.power);
+    const execRates = history.map(h => h.execution_rate);
+
+    const avgFreq = freqs.length > 0 ? freqs.reduce((a, b) => a + b, 0) / freqs.length : 0;
+    const maxPower = Math.max(...powers);
+    const peakIndex = powers.indexOf(maxPower);
+    
+    // Format peak time
+    let peakTime = 'N/A';
+    const rawPeakTime = history[peakIndex]?.time;
+    if (rawPeakTime) {
+      try {
+        const date = new Date(rawPeakTime);
+        peakTime = isNaN(date.getTime()) ? rawPeakTime : date.toLocaleString();
+      } catch (e) {
+        peakTime = rawPeakTime;
+      }
+    }
+
+    const stability = execRates.length > 0 ? execRates.reduce((a, b) => a + b, 0) / execRates.length : 0;
+    const lowExecCount = execRates.filter(r => r < 95).length;
+
+    // Standard deviation for frequency
+    const squareDiffs = freqs.map(f => Math.pow(f - avgFreq, 2));
+    const avgSquareDiff = squareDiffs.reduce((a, b) => a + b, 0) / squareDiffs.length;
+    const stdDevFreq = Math.sqrt(avgSquareDiff);
+
+    return {
+      avgFreq,
+      maxPower,
+      peakTime,
+      stability,
+      lowExecCount,
+      stdDevFreq
+    };
+  }, [history]);
 
   useEffect(() => {
     setNotifications([]); // Clear notifications when site changes
@@ -257,22 +354,16 @@ export default function App() {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-        const [statusRes, historyRes] = await Promise.all([
-          fetch(`${API_BASE}/get_plant_EquipData/satus?${apiSiteName}`, { signal: controller.signal }),
-          fetch(`${API_BASE}/api/ems/history?site=${selectedSite}`, { signal: controller.signal })
-        ]);
+        const statusRes = await fetch(`${API_BASE}/get_plant_EquipData/satus?${apiSiteName}`, { signal: controller.signal });
 
         clearTimeout(timeoutId);
 
-        if (statusRes.ok && historyRes.ok) {
+        if (statusRes.ok) {
           const statusContentType = statusRes.headers.get("content-type");
-          const historyContentType = historyRes.headers.get("content-type");
           
-          if (statusContentType?.includes("application/json") && historyContentType?.includes("application/json")) {
+          if (statusContentType?.includes("application/json")) {
             const statusData = await statusRes.json();
-            const historyData = await historyRes.json();
             setData(statusData);
-            setHistory(historyData);
             
             // 更新告警
             if (statusData.alerts?.length > 0) {
@@ -291,20 +382,14 @@ export default function App() {
 
       // Fallback: 呼叫原本的伺服器端 API (會回傳 Mock 資料)
       try {
-        const [statusRes, historyRes] = await Promise.all([
-          fetch(`/api/ems/status?site=${selectedSite}`),
-          fetch(`/api/ems/history?site=${selectedSite}`)
-        ]);
+        const statusRes = await fetch(`/api/ems/status?site=${selectedSite}`);
 
-        if (statusRes.ok && historyRes.ok) {
+        if (statusRes.ok) {
           const statusContentType = statusRes.headers.get("content-type");
-          const historyContentType = historyRes.headers.get("content-type");
 
-          if (statusContentType?.includes("application/json") && historyContentType?.includes("application/json")) {
+          if (statusContentType?.includes("application/json")) {
             const statusData = await statusRes.json();
-            const historyData = await historyRes.json();
             setData(statusData);
-            setHistory(historyData);
 
             // 補上模擬模式下的告警更新邏輯
             if (statusData.alerts?.length > 0) {
@@ -314,10 +399,10 @@ export default function App() {
               });
             }
           } else {
-            console.warn("Fallback API returned non-JSON response", { statusContentType, historyContentType });
+            console.warn("Fallback API returned non-JSON response", { statusContentType });
           }
         } else {
-          console.warn("Fallback API returned non-ok status", { status: statusRes.status, history: historyRes.status });
+          console.warn("Fallback API returned non-ok status", { status: statusRes.status });
         }
       } catch (error) {
         console.error("Failed to fetch fallback data", error);
@@ -325,9 +410,23 @@ export default function App() {
     };
 
     fetchData();
+    fetchHistoryData(selectedSite);
+    
     const interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
   }, [selectedSite]);
+
+  const getServiceTypeLabel = (type: number) => {
+    const mapping: Record<number, string> = {
+      1: 'AFC',
+      2: 'dReg',
+      3: 'sReg',
+      4: '即時備轉',
+      5: '補充備轉',
+      6: 'E-dReg'
+    };
+    return mapping[type] || '未知';
+  };
 
   if (!data) return (
     <div className="min-h-screen bg-black flex items-center justify-center">
@@ -522,305 +621,522 @@ export default function App() {
 
         {/* Content Area */}
         <div className="p-8 max-w-7xl mx-auto space-y-8">
-          {/* Top Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <StatCard 
-              label="電池電量 (SoC)" 
-              value={data.battery.soc} 
-              unit="%" 
-              icon={Battery} 
-              trend={2.4}
-              color="bg-emerald-600"
-            />
-            <StatCard 
-              label="系統頻率" 
-              value={data.system.frequency.toFixed(3)} 
-              unit="Hz" 
-              icon={Zap} 
-              color="bg-blue-500"
-            />
-            <StatCard 
-              label="系統實功" 
-              value={data.system.real_power_kw} 
-              unit="kW" 
-              icon={Activity} 
-              color="bg-amber-500"
-            />
-            <StatCard 
-              label="系統虛功" 
-              value={data.system.reactive_power_kvar} 
-              unit="kVAR" 
-              icon={ShieldCheck} 
-              color="bg-indigo-500"
-            />
-          </div>
-
-          {/* Secondary Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <StatCard 
-              label="平均執行率" 
-              value={data.system.execution_rate} 
-              unit="%" 
-              icon={Activity} 
-              color="bg-rose-500"
-            />
-            <StatCard 
-              label="電池最高溫" 
-              value={data.battery.max_temp.value} 
-              unit="°C" 
-              icon={Thermometer} 
-              color="bg-orange-500"
-            />
-            <StatCard 
-              label="系統健康度 (SoH)" 
-              value={data.battery.soh} 
-              unit="%" 
-              icon={ShieldCheck} 
-              color="bg-teal-500"
-            />
-            <StatCard 
-              label="匯流排電壓" 
-              value={data.system.bus_voltage} 
-              unit="V" 
-              icon={Zap} 
-              color="bg-zinc-500"
-            />
-          </div>
-
-          {/* Device Status Grid */}
-          <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-zinc-800 rounded-lg text-zinc-400">
-                  <Activity size={20} />
-                </div>
-                <h3 className="text-lg font-bold text-white">案場設備運行狀況</h3>
-              </div>
-              <span className="text-xs text-zinc-500 font-mono uppercase">
-                Total Devices: {data.devices.length}
-              </span>
-            </div>
-            
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-              {data.devices.map((device) => (
-                <div 
-                  key={device.id}
-                  onClick={() => setSelectedDevice(device)}
-                  className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/30 hover:border-emerald-600/50 hover:bg-zinc-800/50 transition-all cursor-pointer group"
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    <p className="text-xs font-bold text-zinc-400 truncate">{device.name}</p>
-                    <div className={cn(
-                      "w-2 h-2 rounded-full",
-                      device.status === 'normal' ? "bg-emerald-600 shadow-[0_0_8px_rgba(5,150,105,0.5)]" : 
-                      device.status === 'warning' ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" : 
-                      "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]"
-                    )} />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] text-zinc-500 uppercase">SOC</span>
-                      <span className="text-xs font-mono text-white">{device.soc.toFixed(1)}%</span>
+          {activeTab === 'dashboard' && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8"
+            >
+              {/* Top Stats */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+                <StatCard 
+                  label="電池電量 (SoC)" 
+                  value={data.battery.soc} 
+                  unit="%" 
+                  icon={Battery} 
+                  trend={2.4}
+                  color="bg-emerald-600"
+                />
+                <StatCard 
+                  label="系統頻率" 
+                  value={data.system.frequency.toFixed(3)} 
+                  unit="Hz" 
+                  icon={Zap} 
+                  color="bg-blue-500"
+                />
+                <StatCard 
+                  label="系統實功" 
+                  value={data.system.real_power_kw} 
+                  unit="kW" 
+                  icon={Activity} 
+                  color="bg-amber-500"
+                />
+                <StatCard 
+                  label="系統虛功" 
+                  value={data.system.reactive_power_kvar} 
+                  unit="kVAR" 
+                  icon={ShieldCheck} 
+                  color="bg-indigo-500"
+                />
+                <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 flex flex-col justify-between">
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="p-2 bg-rose-500/10 rounded-lg">
+                      <Settings size={20} className="text-rose-500" />
                     </div>
-                    <div className="w-full bg-zinc-800 h-1 rounded-full overflow-hidden">
-                      <div 
-                        className={cn(
-                          "h-full transition-all duration-500",
-                          device.soc > 20 ? "bg-emerald-600" : "bg-rose-500"
-                        )}
-                        style={{ width: `${device.soc}%` }}
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Service Type</span>
+                  </div>
+                  <div>
+                    <p className="text-xs text-zinc-500 font-medium uppercase mb-1">服務樣態</p>
+                    <p className="text-2xl font-bold text-white tracking-tight">
+                      {getServiceTypeLabel(data.system.service_type || 1)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Power Flow / Distribution */}
+                <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 flex flex-col">
+                  <h3 className="text-lg font-semibold text-white mb-6">能量流向</h3>
+                  
+                  <div className="flex-1 flex flex-col justify-around gap-4">
+                    <div className="flex items-center justify-between p-4 bg-zinc-950 rounded-xl border border-zinc-800">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-500/10 rounded-lg">
+                          <CloudSun size={20} className="text-amber-500" />
+                        </div>
+                        <div>
+                          <p className="text-xs text-zinc-500 font-medium uppercase">光伏發電 (PV)</p>
+                          <p className="text-lg font-bold text-white">{data.power.pv_kw.toFixed(1)} kW</p>
+                        </div>
+                      </div>
+                      <ArrowDownRight className="text-emerald-600" />
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-zinc-950 rounded-xl border border-zinc-800">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-500/10 rounded-lg">
+                          <Home size={20} className="text-blue-500" />
+                        </div>
+                        <div>
+                          <p className="text-xs text-zinc-500 font-medium uppercase">負載消耗 (Load)</p>
+                          <p className="text-lg font-bold text-white">{data.power.load_kw.toFixed(1)} kW</p>
+                        </div>
+                      </div>
+                      <ArrowUpRight className="text-rose-500" />
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-zinc-950 rounded-xl border border-zinc-800">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-emerald-600/10 rounded-lg">
+                          <Battery size={20} className="text-emerald-600" />
+                        </div>
+                        <div>
+                          <p className="text-xs text-zinc-500 font-medium uppercase">儲能系統 (BESS)</p>
+                          <p className="text-lg font-bold text-white">{data.power.battery_kw.toFixed(1)} kW</p>
+                        </div>
+                      </div>
+                      <div className={cn("text-xs font-bold px-2 py-1 rounded", data.power.battery_kw > 0 ? "bg-emerald-600/20 text-emerald-500" : "bg-blue-500/20 text-blue-400")}>
+                        {data.power.battery_kw > 0 ? '放電中' : '充電中'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Quick Alerts Summary */}
+                <div className="lg:col-span-2 bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-lg font-semibold text-white">最新告警摘要</h3>
+                    <button onClick={() => setActiveTab('alerts')} className="text-xs text-emerald-500 hover:underline">查看全部</button>
+                  </div>
+                  <div className="space-y-4">
+                    {notifications.length === 0 ? (
+                      <div className="py-12 text-center">
+                        <ShieldCheck size={40} className="text-zinc-800 mx-auto mb-3" />
+                        <p className="text-zinc-500 text-sm">目前系統運行良好，無異常告警</p>
+                      </div>
+                    ) : (
+                      notifications.slice(0, 5).map((alert) => (
+                        <div key={alert.id} className="flex items-center gap-4 p-3 bg-zinc-950 rounded-xl border border-zinc-800">
+                          <div className={cn(
+                            "w-2 h-2 rounded-full",
+                            alert.type === 'critical' ? "bg-rose-500 animate-pulse" : "bg-amber-500"
+                          )} />
+                          <div className="flex-1">
+                            <p className="text-xs font-medium text-zinc-200">{alert.message}</p>
+                            <p className="text-[10px] text-zinc-500">{new Date(alert.time).toLocaleString()}</p>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'monitor' && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8"
+            >
+              {/* Secondary Stats for Monitor */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <StatCard 
+                  label="電池最高溫" 
+                  value={data.battery.max_temp.value} 
+                  unit="°C" 
+                  icon={Thermometer} 
+                  color="bg-orange-500"
+                />
+                <StatCard 
+                  label="系統健康度 (SoH)" 
+                  value={data.battery.soh} 
+                  unit="%" 
+                  icon={ShieldCheck} 
+                  color="bg-teal-500"
+                />
+                <StatCard 
+                  label="匯流排電壓" 
+                  value={data.system.bus_voltage} 
+                  unit="V" 
+                  icon={Zap} 
+                  color="bg-zinc-500"
+                />
+                <StatCard 
+                  label="平均執行率" 
+                  value={data.system.execution_rate} 
+                  unit="%" 
+                  icon={Activity} 
+                  color="bg-rose-500"
+                />
+              </div>
+
+              {/* Device Status Grid */}
+              <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-zinc-800 rounded-lg text-zinc-400">
+                      <Activity size={20} />
+                    </div>
+                    <h3 className="text-lg font-bold text-white">案場設備運行狀況</h3>
+                  </div>
+                  <span className="text-xs text-zinc-500 font-mono uppercase">
+                    Total Devices: {data.devices.length}
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                  {data.devices.map((device) => (
+                    <div 
+                      key={device.id}
+                      onClick={() => setSelectedDevice(device)}
+                      className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/30 hover:border-emerald-600/50 hover:bg-zinc-800/50 transition-all cursor-pointer group"
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <p className="text-xs font-bold text-zinc-400 truncate">{device.name}</p>
+                        <div className={cn(
+                          "w-2 h-2 rounded-full",
+                          device.status === 'normal' ? "bg-emerald-600 shadow-[0_0_8px_rgba(5,150,105,0.5)]" : 
+                          device.status === 'warning' ? "bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" : 
+                          "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]"
+                        )} />
+                      </div>
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] text-zinc-500 uppercase">SOC</span>
+                          <span className="text-xs font-mono text-white">{device.soc.toFixed(1)}%</span>
+                        </div>
+                        <div className="w-full bg-zinc-800 h-1 rounded-full overflow-hidden">
+                          <div 
+                            className={cn(
+                              "h-full transition-all duration-500",
+                              device.soc > 20 ? "bg-emerald-600" : "bg-rose-500"
+                            )}
+                            style={{ width: `${device.soc}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between items-center pt-1">
+                          <span className="text-[10px] text-zinc-500 uppercase">Temp</span>
+                          <span className="text-xs font-mono text-zinc-300">{device.temp.toFixed(1)}°C</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Real-time Trends Chart */}
+              <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
+                <div className="flex items-center gap-2 mb-6">
+                  <div className="p-2 bg-zinc-800 rounded-lg text-zinc-400">
+                    <History size={20} />
+                  </div>
+                  <h3 className="text-lg font-bold text-white">即時運行趨勢 (最近 24 小時)</h3>
+                </div>
+                
+                <div className="h-[400px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={history}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+                      <XAxis 
+                        dataKey="time" 
+                        stroke="#4b5563" 
+                        fontSize={10} 
+                        tickLine={false} 
+                        axisLine={false} 
+                        tickFormatter={(value) => {
+                          try {
+                            const date = new Date(value);
+                            return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+                          } catch (e) {
+                            return value;
+                          }
+                        }}
+                      />
+                      <YAxis 
+                        yAxisId="left"
+                        stroke="#4b5563" 
+                        fontSize={12} 
+                        tickLine={false} 
+                        axisLine={false} 
+                        domain={['auto', 'auto']}
+                      />
+                      <YAxis 
+                        yAxisId="right"
+                        orientation="right"
+                        stroke="#4b5563" 
+                        fontSize={12} 
+                        tickLine={false} 
+                        axisLine={false} 
+                        domain={[59.8, 60.2]}
+                      />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px' }}
+                      />
+                      <Legend verticalAlign="top" height={36}/>
+                      <Line 
+                        yAxisId="left"
+                        type="monotone" 
+                        dataKey="execution_rate" 
+                        name="執行率 (%)"
+                        stroke="#10b981" 
+                        strokeWidth={2}
+                        dot={false}
+                        isAnimationActive={false}
+                      />
+                      <Line 
+                        yAxisId="right"
+                        type="monotone" 
+                        dataKey="frequency" 
+                        name="頻率 (Hz)"
+                        stroke="#3b82f6" 
+                        strokeWidth={2}
+                        dot={false}
+                        isAnimationActive={false}
+                      />
+                      <Line 
+                        yAxisId="left"
+                        type="monotone" 
+                        dataKey="power" 
+                        name="有效功率 (kW)"
+                        stroke="#f59e0b" 
+                        strokeWidth={2}
+                        dot={false}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'history' && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8"
+            >
+              {/* History Analysis Header with Date Picker */}
+              <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-white">歷史趨勢分析</h3>
+                    <p className="text-sm text-zinc-500">請選擇分析時段以查看詳細運行數據</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-500">從</span>
+                      <input 
+                        type="datetime-local" 
+                        value={historyRange.start}
+                        onChange={(e) => setHistoryRange(prev => ({ ...prev, start: e.target.value }))}
+                        className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-emerald-600"
                       />
                     </div>
-                    <div className="flex justify-between items-center pt-1">
-                      <span className="text-[10px] text-zinc-500 uppercase">Temp</span>
-                      <span className="text-xs font-mono text-zinc-300">{device.temp.toFixed(1)}°C</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-500">至</span>
+                      <input 
+                        type="datetime-local" 
+                        value={historyRange.end}
+                        onChange={(e) => setHistoryRange(prev => ({ ...prev, end: e.target.value }))}
+                        className="bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-emerald-600"
+                      />
                     </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Main Chart */}
-            <div className="lg:col-span-2 bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
-              <div className="flex justify-between items-center mb-8">
-                <div>
-                  <h3 className="text-lg font-semibold text-white">執行率 / 頻率 / 有效功率趨勢</h3>
-                  <p className="text-sm text-zinc-500">過去 24 小時運行數據分析</p>
-                </div>
-                <div className="flex gap-2">
-                  <button className="px-3 py-1 text-xs font-medium bg-zinc-800 text-zinc-300 rounded-md hover:bg-zinc-700 transition-colors">1H</button>
-                  <button className="px-3 py-1 text-xs font-medium bg-emerald-600 text-white rounded-md shadow-lg shadow-emerald-600/20">24H</button>
-                  <button className="px-3 py-1 text-xs font-medium bg-zinc-800 text-zinc-300 rounded-md hover:bg-zinc-700 transition-colors">7D</button>
-                </div>
-              </div>
-              
-              <div className="h-[350px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={history}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
-                    <XAxis 
-                      dataKey="time" 
-                      stroke="#4b5563" 
-                      fontSize={12} 
-                      tickLine={false} 
-                      axisLine={false} 
-                    />
-                    <YAxis 
-                      yAxisId="left"
-                      stroke="#4b5563" 
-                      fontSize={12} 
-                      tickLine={false} 
-                      axisLine={false} 
-                    />
-                    <YAxis 
-                      yAxisId="right"
-                      orientation="right"
-                      stroke="#4b5563" 
-                      fontSize={12} 
-                      tickLine={false} 
-                      axisLine={false} 
-                    />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px' }}
-                    />
-                    <Legend />
-                    <Line 
-                      yAxisId="left"
-                      type="monotone" 
-                      dataKey="execution_rate" 
-                      name="執行率 (%)"
-                      stroke="#10b981" 
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                    <Line 
-                      yAxisId="right"
-                      type="monotone" 
-                      dataKey="frequency" 
-                      name="頻率 (Hz)"
-                      stroke="#3b82f6" 
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                    <Line 
-                      yAxisId="left"
-                      type="monotone" 
-                      dataKey="power" 
-                      name="有效功率 (kW)"
-                      stroke="#f59e0b" 
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Power Flow / Distribution */}
-            <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6 flex flex-col">
-              <h3 className="text-lg font-semibold text-white mb-6">能量流向</h3>
-              
-              <div className="flex-1 flex flex-col justify-around">
-                <div className="flex items-center justify-between p-4 bg-zinc-950 rounded-xl border border-zinc-800">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-amber-500/10 rounded-lg">
-                      <CloudSun size={20} className="text-amber-500" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-zinc-500 font-medium uppercase">光伏發電 (PV)</p>
-                      <p className="text-lg font-bold text-white">{data.power.pv_kw.toFixed(1)} kW</p>
-                    </div>
-                  </div>
-                  <ArrowDownRight className="text-emerald-600" />
-                </div>
-
-                <div className="flex items-center justify-between p-4 bg-zinc-950 rounded-xl border border-zinc-800">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-500/10 rounded-lg">
-                      <Home size={20} className="text-blue-500" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-zinc-500 font-medium uppercase">負載消耗 (Load)</p>
-                      <p className="text-lg font-bold text-white">{data.power.load_kw.toFixed(1)} kW</p>
-                    </div>
-                  </div>
-                  <ArrowUpRight className="text-rose-500" />
-                </div>
-
-                <div className="flex items-center justify-between p-4 bg-zinc-950 rounded-xl border border-zinc-800">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-emerald-600/10 rounded-lg">
-                      <Battery size={20} className="text-emerald-600" />
-                    </div>
-                    <div>
-                      <p className="text-xs text-zinc-500 font-medium uppercase">儲能系統 (BESS)</p>
-                      <p className="text-lg font-bold text-white">{data.power.battery_kw.toFixed(1)} kW</p>
-                    </div>
-                  </div>
-                  <div className={cn("text-xs font-bold px-2 py-1 rounded", data.power.battery_kw > 0 ? "bg-emerald-600/20 text-emerald-500" : "bg-blue-500/20 text-blue-400")}>
-                    {data.power.battery_kw > 0 ? '放電中' : '充電中'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 pt-6 border-t border-zinc-800">
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-zinc-500">系統運行時間</span>
-                  <span className="text-zinc-200 font-mono">{data.system.uptime}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Alerts Section */}
-          <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
-              <div className="flex items-center gap-3">
-                <AlertTriangle className="text-amber-500" size={20} />
-                <h3 className="text-lg font-semibold text-white">即時告警與通知</h3>
-              </div>
-              <button className="text-sm text-emerald-600 hover:underline font-medium">查看全部歷史</button>
-            </div>
-            
-            <div className="divide-y divide-zinc-800">
-              <AnimatePresence mode="popLayout">
-                {notifications.length === 0 ? (
-                  <div className="p-12 text-center">
-                    <p className="text-zinc-500 text-sm">目前無任何異常告警，系統運行良好。</p>
-                  </div>
-                ) : (
-                  notifications.map((alert) => (
-                    <motion.div 
-                      key={alert.id}
-                      initial={{ opacity: 0, y: -20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      className="p-4 flex items-start gap-4 hover:bg-zinc-800/30 transition-colors"
+                    <button 
+                      onClick={handleAnalyze}
+                      className="px-4 py-1.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-500 transition-colors"
                     >
-                      <div className={cn(
-                        "p-2 rounded-full mt-1",
-                        alert.type === 'critical' ? "bg-rose-500/20 text-rose-500" : "bg-amber-500/20 text-amber-500"
-                      )}>
-                        <AlertTriangle size={16} />
+                      執行分析
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Detailed Statistics for History */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+                  <p className="text-xs text-zinc-500 mb-1 uppercase font-bold tracking-wider">平均頻率</p>
+                  <p className="text-2xl font-mono text-blue-400">{historyStats.avgFreq.toFixed(3)} <span className="text-sm">Hz</span></p>
+                  <div className="mt-2 text-[10px] text-zinc-600">標準差: {historyStats.stdDevFreq.toFixed(4)} Hz</div>
+                </div>
+                <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+                  <p className="text-xs text-zinc-500 mb-1 uppercase font-bold tracking-wider">最大輸出功率</p>
+                  <p className="text-2xl font-mono text-amber-400">{historyStats.maxPower.toLocaleString()} <span className="text-sm">kW</span></p>
+                  <div className="mt-2 text-[10px] text-zinc-600">峰值時間: {historyStats.peakTime}</div>
+                </div>
+                <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+                  <p className="text-xs text-zinc-500 mb-1 uppercase font-bold tracking-wider">執行率穩定度</p>
+                  <p className="text-2xl font-mono text-emerald-400">{historyStats.stability.toFixed(2)} <span className="text-sm">%</span></p>
+                  <div className="mt-2 text-[10px] text-zinc-600">低於 95% 次數: {historyStats.lowExecCount}</div>
+                </div>
+              </div>
+
+              {/* Full Width Main Chart */}
+              <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
+                <div className="h-[500px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={history}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" vertical={false} />
+                      <XAxis 
+                        dataKey="time" 
+                        stroke="#4b5563" 
+                        fontSize={10} 
+                        tickLine={false} 
+                        axisLine={false} 
+                        tickFormatter={(value) => {
+                          try {
+                            const date = new Date(value);
+                            if (isNaN(date.getTime())) return value;
+                            
+                            const start = new Date(historyRange.start);
+                            const end = new Date(historyRange.end);
+                            const diffHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+                            
+                            if (diffHours <= 24) {
+                              return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+                            }
+                            return `${date.getMonth() + 1}/${date.getDate()}`;
+                          } catch (e) {
+                            return value;
+                          }
+                        }}
+                      />
+                      <YAxis 
+                        yAxisId="left"
+                        stroke="#4b5563" 
+                        fontSize={12} 
+                        tickLine={false} 
+                        axisLine={false} 
+                        domain={['auto', 'auto']}
+                      />
+                      <YAxis 
+                        yAxisId="right"
+                        orientation="right"
+                        stroke="#4b5563" 
+                        fontSize={12} 
+                        tickLine={false} 
+                        axisLine={false} 
+                        domain={[59.8, 60.2]}
+                      />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#111827', border: '1px solid #374151', borderRadius: '8px' }}
+                      />
+                      <Legend verticalAlign="top" height={36}/>
+                      <Line 
+                        yAxisId="left"
+                        type="monotone" 
+                        dataKey="execution_rate" 
+                        name="執行率 (%)"
+                        stroke="#10b981" 
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                      <Line 
+                        yAxisId="right"
+                        type="monotone" 
+                        dataKey="frequency" 
+                        name="頻率 (Hz)"
+                        stroke="#3b82f6" 
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                      <Line 
+                        yAxisId="left"
+                        type="monotone" 
+                        dataKey="power" 
+                        name="有效功率 (kW)"
+                        stroke="#f59e0b" 
+                        strokeWidth={2}
+                        dot={false}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'alerts' && (
+            <motion.div 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-8"
+            >
+              {/* Alerts Section */}
+              <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl overflow-hidden">
+                <div className="p-6 border-b border-zinc-800 flex justify-between items-center">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="text-amber-500" size={20} />
+                    <h3 className="text-lg font-semibold text-white">告警管理中心</h3>
+                  </div>
+                  <button className="text-sm text-emerald-600 hover:underline font-medium">匯出報表</button>
+                </div>
+                
+                <div className="divide-y divide-zinc-800">
+                  <AnimatePresence mode="popLayout">
+                    {notifications.length === 0 ? (
+                      <div className="p-24 text-center">
+                        <ShieldCheck size={48} className="text-zinc-800 mx-auto mb-4" />
+                        <p className="text-zinc-500 text-sm">目前無任何異常告警，系統運行良好。</p>
                       </div>
-                      <div className="flex-1">
-                        <div className="flex justify-between items-start">
-                          <p className="text-sm font-medium text-zinc-200">{alert.message}</p>
-                          <span className="text-[10px] font-mono text-zinc-500 uppercase">{new Date(alert.time).toLocaleTimeString()}</span>
-                        </div>
-                        <p className="text-xs text-zinc-500 mt-1">設備 ID: BATT-ARRAY-03 | 模組: 電池管理單元 (BMU)</p>
-                      </div>
-                      <button className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider border border-zinc-700 rounded hover:bg-zinc-700 transition-colors">
-                        確認處理
-                      </button>
-                    </motion.div>
-                  ))
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
+                    ) : (
+                      notifications.map((alert) => (
+                        <motion.div 
+                          key={alert.id}
+                          initial={{ opacity: 0, y: -20 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, scale: 0.95 }}
+                          className="p-6 flex items-start gap-4 hover:bg-zinc-800/30 transition-colors"
+                        >
+                          <div className={cn(
+                            "p-2 rounded-full mt-1",
+                            alert.type === 'critical' ? "bg-rose-500/20 text-rose-500" : "bg-amber-500/20 text-amber-500"
+                          )}>
+                            <AlertTriangle size={16} />
+                          </div>
+                          <div className="flex-1">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="text-sm font-medium text-zinc-200">{alert.message}</p>
+                                <p className="text-xs text-zinc-500 mt-1">設備 ID: {data.deviceId} | 場域: {data.siteName}</p>
+                              </div>
+                              <span className="text-xs font-mono text-zinc-500 uppercase">{new Date(alert.time).toLocaleString()}</span>
+                            </div>
+                          </div>
+                          <button className="px-4 py-2 text-xs font-bold uppercase tracking-wider border border-zinc-700 rounded-lg hover:bg-zinc-700 transition-colors">
+                            確認處理
+                          </button>
+                        </motion.div>
+                      ))
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </div>
       </main>
 
